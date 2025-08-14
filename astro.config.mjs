@@ -6,8 +6,7 @@ import { defineConfig } from 'astro/config';
 
 // https://astro.build/config
 export default defineConfig({
-	site: 'https://diogoos.github.io',
-	base: "/analyticalbyte",
+	site: 'https://analyticalbyte.com/',
 	integrations: [mdx(), sitemap()],
 	markdown: {
 		shikiConfig: {

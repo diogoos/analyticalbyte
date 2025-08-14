@@ -134,3 +134,14 @@ a, a.active {
 	/* added line to stop words getting smushed together (as they go onto separate lines and some screen readers do not understand line feeds as a space */
 	white-space: nowrap;
 }
+
+/* Style gist embeds in dark mode, rounded radius */
+.gist {
+	filter: invert() hue-rotate(180deg);
+}
+.gist .gist-data {
+	border-radius: 0.8em 0.8em 0 0 !important;
+}
+.gist .gist-meta {
+	border-radius: 0 0 0.8em 0.8em !important;
+}
