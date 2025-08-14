@@ -6,7 +6,7 @@ const blog = defineCollection({
 	loader: glob({ base: './src/content/blog', pattern: '**/*.{md,mdx}' }),
 	
 	// Type-check frontmatter using a schema
-	schema: () =>
+	schema: ({ image }) =>
 		z.object({
 			title: z.string(),
 			description: z.string(),
@@ -15,6 +15,7 @@ const blog = defineCollection({
 			updatedDate: z.coerce.date().optional(),
 			// static pages (hidden, no date)
 			_static: z.boolean().optional(),
+			cardImage: image().optional()
 		}),
 });
 
