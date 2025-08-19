@@ -161,8 +161,101 @@ however, the terms _North America_ and _Alaska_ are encoded as vectors close to 
 allowing the answer to be surfaced nonetheless, as if the underlying system "understands" 
 our requests.
 
+### Simple Wikipedia Search Tool
+Satisfied with the general performance of this basic model, my next step in this 
+project was to build a better _Simple Wikipedia Search Tool_ that performed well,
+but was somewhat more robust and efficient. This tool had to address three main
+problems with the proof of concept:
+
+1. While we were previously storing embeddings in a simple `jsonl` file, this
+was very storage & memory inefficient: we had to load all the embeddings & all
+the metadata at once, then query into it. This led to a substantial performance
+hit, as it took several minutes to load everything into memory, and led to the 
+Python process taking up ~10GB of memory.
+
+2. Chunking input into sentences was useful, but the sentences were too small and
+often led to a loss of context. For example, when we indexed the sentence:
+"It was the first of its kind.", without the previous paragraph pointing out what
+_it_ is, the embedding is too broad and isn't useful for search.
+
+3. Since the vector search was across _chunks_, the same page would show up on the
+results overview multiple times. Instead of having repeated results, since we are
+emulating a search engine, it would be preferable to instead rank these pages higher,
+as they are more relevant, and show other pertient options below it. It would 
+also be better to have a minimum score cutoff, to prevent irrelevant
+results from polluting the search when no/few good matches were found.
+
+#### Memory Efficiency & FAISS
+Firstly, to solve the memory efficiency problem, I made use of the [`faiss`](https://github.com/facebookresearch/faiss)
+package from Facebook Research, which is designed for fast similarity search
+on large vector datasets. Now, instead of keeping all embeddings in
+Python memory as numpy arrays, FAISS stores them in an optimized index
+structure on disk, enabling very fast searches.
+
+In addition to FAISS, we need to keep a metadata file containing the information
+needed to reconstruct the search results once FAISS returns a match. Thus, for
+each chunk, we also store a unique ID that corresponds to the embedding in the FAISS index;
+the URL of the original Wikipedia page the chunk came from; and text of the chunk itself,
+so we can display it in search results or pass it to downstream processing.
+
+Using this method, we can query millions of embeddings much faster, and without
+having to load all the embeddings or all the chunks. Since the IDs assigned by
+FAISS are sequential, we can store hte metadata in a `jsonl` file, where each
+line corresponds to metadata for a given entry. Thus, we can lazy-load only the
+metadata needed for the retrieved entries.
+
+These optimizations reduce the process footprint from 10GB to a fraction of that.
+Moreover, since the storage of the embeddings is also much more efficient, the 
+total storage footprint of the search tool was reduced from ~6.5GB to only 884MB, 
+of which 742MB is FAISS index, and 142MB is the gzip'd metadata. In total, that's
+an almost 6x reduction in storage.
+
+#### Chunking and ranking
+To solve the second issue, I moved from sentence-level chunks to 200-word chunks
+with a 50-word overlap. This more balanced approach keeps enough context for the
+embeddings to make sense, while still keeping the text segments manageable enough
+for the vector model. Having the overlap ensures that content at the edges of
+chunks isn't lost and allows, the embeddings to retain connections across
+sentences and paragraphs, solving the previous issues.
+
+Finally, to prevent duplicate page results, the search tool now groups result
+by the original page and ranks pages by the highest scoring chunk. If multiple
+chunks from the same page match the query, we only show the page once at the top
+with the highest score, while other relevant pages appear below. Additionally, 
+we manually increase the score of pages with multiple chunks, since having 
+everal high-scoring chunks from the same page is a strong signal of relevance.
+Lastly, a minimum similarity score cutoff filters out poor matches, ensuring that
+only genuinely relevant pages appear in the results.
+
+#### Results
+In practice, the search tool consistently surfaces informative and relevant
+content for a wide variety of queries. The results show a natural ranking of
+importance, highlighting the most pertinent pages first while still offering
+additional context from related content.
+Overall, the outputs feel relatively organized and coherent, giving users
+meaningful answers without overwhelming them with noise.
+
+{/* Image carousel -- query demos */}
+import "@splidejs/splide/css/skyblue";
+import { Splide, SplideSlide } from 'astro-splide';
+import wk1 from "../../assets/searchengine_wikisearch_1.png"
+import wk2 from "../../assets/searchengine_wikisearch_2.png"
+import wk3 from "../../assets/searchengine_wikisearch_3.png"
+
+<Splide aria-label="Example queries using Simple Wikipedia embeddings">
+  <SplideSlide> <img src={wk1.src} alt="Query: dog breed black and white; Top result: Dalmatian"/> </SplideSlide>
+  <SplideSlide> <img src={wk2.src} alt="Query: hawaii island name; Top result: Maui"/> </SplideSlide>
+  <SplideSlide> <img src={wk3.src} alt="Query: college in hanover nh; Top result: Dartmouth College"/> </SplideSlide>
+</Splide>
+<br/>
+
+The examples above, similarly to the initial proof of concept, are particularly good
+because they are able to find the "intent" behind these queries, highlighting
+the semantic similarity between "NH" and "New Hampshire", for example, and
+surfacing relevant content.
+
 ### To be continued...
 ***This post is a WIP. It will soon be updated.***
 
 <br/>
-#### Further reading
+### Further reading
