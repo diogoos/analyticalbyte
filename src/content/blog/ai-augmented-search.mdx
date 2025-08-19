@@ -1,0 +1,168 @@
+---
+title: "Building an AI-augmented search engine"
+description: "Using vector embeddings to create a better search engine"
+pubDate: 'Aug 19 2025'
+---
+Search kind of sucks nowadays.
+Even a simple query likely yields pages of "slop" content that hijacks SEO in order
+to suck-in traffic and steal advertising dollars.  The situation has gotten so
+bad, that people have resorted to appending `site:reddit.com` to their
+queries in order to try to more pertinent results.
+
+For a while now, I have wondered, _why is search so hard?_ In order to better understand
+the inner workings of search engines, and as a fun side project, I decided that it would be
+cool to try to build my own version of a search engine.
+
+I wanted to see if modern AI-enhanced approaches could make the experience
+feel closer to how search _should_ work. Instead of SEO trickery, what if a search
+engine could actually understand the meaning of your query, and return exactly
+what you are looking for?
+
+<blockquote class="twitter-tweet" data-align="center" data-theme="dark"><p lang="en" dir="ltr">Google back in 2010 was crazy. You could look up anything and it’d be there.</p>&mdash; Daniel (@growing_daniel) <a href="https://twitter.com/growing_daniel/status/1691961583126122887?ref_src=twsrc%5Etfw">August 16, 2023</a></blockquote> <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+<br/>
+
+
+### My Background with Search Engines
+
+One of the core courses I had to take toward my CS is called [CS50: Software Design and Implementation](https://www.cs.dartmouth.edu/~tjp/cs50/index.html).
+The course is all about how to structure & document code, as well as
+how to work collaboratively using tools such as git. One of two culminating projects
+for this class was to build a "tiny search engine", nicknamed TSE.
+
+The whole build process included `crawler`, `indexer`, and `querier` modules with full
+scoring and ranking. The project was built in low-level C, which meant that we 
+had to reimplement data structures such as hashtables, counters, and sets; 
+fully manage memory allocation; and interface with system-level file and networking
+protocols.
+
+![Example of a TSE query](../../assets/searchengine_tse_demo.png)
+<p style="text-align: center; margin-top: -4em;">_A demo of a TSE query running on my [Linux on MacOS setup](/setting-up-arch-on-mac/)_</p>
+
+Unfortunately, the code for TSE cannot be made public, at least while the CS curriculum
+remains the same (which it likely will for a _very_ long time). However, for my
+new search engine project, I want to start from scratch again anyways. The
+original TSE only crawled a small clone of several wikipedia pages, had no
+semantic search, and used a rather rudimentary algorithm to score results.
+
+Now, I want to focus less on the low-level aspects, and instead incorporate
+modern techniques. This means that we won't be completely rewriting the file stack,
+and instead use modern technologies to augument search. 
+
+### Embeddings: an overview
+Vector embeddings are a way of representing text as points in a high-dimensional space.
+Instead of thinking of words as discrete symbols, we map them into numerical vectors
+(usually 384-dimensional or 768-dimensional real-valued arrays) such that semantically
+similar words or sentences end up close together.
+
+The advantage of using embeddings is that they are able to capture deeper relational
+meaning between words that other techinques, such as *one-hot enconding*, are not.
+For example, the  difference between the vectors for _man_ and _woman_ points in
+roughly the same direction as the difference between _king_ and _queen_. [^1]
+[^1]: Probabilistic Machine Learning: An Introduction by Kevin P. Murphy
+
+![ E(queen) approximates E(king) + E(woman) - E(man) ](../../assets/searchengine_embedding_semantics.jpg)
+
+In the context of search, we extend this concept to sentences, allowing us
+to perform semantic search: instead of matching keywords, we can measure
+geometric proximity in vector space, and retrieve the text that is
+closest in meaning.
+
+One of the most well-known embedding models is BERT, created
+by Google Research. BERT introduced the idea of pretraining a tranformer
+model using by a masked language modeling objective (like a fill-in-the-blank),
+and fine-tuning it for downstream tasks. The embeddings produced
+by BERT capture bidirectional context, meaning they encode information from
+both the left and right of a given token, which leads to much richer semantic
+representations than earlier methods.[^2]
+
+[^2]: BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding, Devlin et al. (2019) https://arxiv.org/pdf/1810.04805
+
+Building on this, more recent work has explored contrastive learning as a
+way to create high-quality sentence representations for fine-tuning models.
+Given pairs of semantically similar texts, the model is trained to bring their
+embeddings closer together, while pushing apart embeddings of unrelated sentences.
+This has become the standard approach for fine-tuning models for semantic search
+and retrieval tasks.[^3]
+[^3]: Contrastive Learning Models for Sentence Representations, 2023 https://dl.acm.org/doi/pdf/10.1145/3593590  
+
+
+### Proof of concept: Wikipedia embeddings
+
+To validate the approach, I built a simple proof of concept using vector
+embeddings for semantic search. Mirroring the TSE project, I first chose to
+index a set of Wikipedia pages, as the index is relatively
+small & has mostly useful information. However, instead of mirroring
+the full database (whose full contents are >1TB decompressed),
+I used the [Simple English Wikipedia](https://simple.wikipedia.org/wiki/Main_Page),
+which is only ~365MB and contains shorter sentences, reducing both
+storage and embedding time.
+
+I chose to build initial proof of concept in a Jupyter notebook. Using
+the [`wikitextparser`](https://pypi.org/project/wikitextparser/) package,
+I filtered out all the MediaWiki syntax, links, and more, returning clean (title, url, text)
+tuples. I then used [NLTK](https://www.nltk.org) to tokenize each
+article's content sentence-by-sentence, so that retrieval could be done at the
+sentence level rather than only at the page level.
+
+For embeddings I began with a pre-trained model to create the vector
+embeddings, namely `all-MiniLM-L6-v2` provided by the [sentence-transformers package](https://sbert.net). 
+This model outputs 384-dimensional vectors designed for semantic similarity tasks.
+Since the purpose of this initial test was just to showcase the relative performance
+of using vector embeddings, this did exactly what I needed.
+
+As an important aside, processing all this data in a single thread would take a
+very long time. So, for both the plain text parsing, as well as for the creation
+of embeddings, I made use of a producer-consumer paradigm (thanks [CS 10!](https://www.cs.dartmouth.edu/~cs10/notes22.html))
+to speed up the process, as follows:
+
+<script src="https://gist.github.com/diogoos/7a057b554fed7baa33fa8bf2b9f387b3.js"></script>
+
+I include this code here mostly as a reference for future projects: I am not
+very familiar with Python built-ins like `ThreadPoolExecutor`, so this template
+is super useful for use in future compute-intensive tasks.
+
+Once the indexing was completed, we were able to evaluate a sampling of
+the results when using these methods:
+
+![Example queries run against the Wikipedia embeddings](../../assets/searchengine_wiki_poc.png)
+The top results for each query proved to be highly relevant, with scores
+reflecting strong semantic matches. For example, "capital of brazil"
+correctly surfaces Brasília as the top result, and shows the capital of other
+Brazilian states as highly-relevant alternatives. Likewise, a query for
+"olympic cities" returns cities that have hosted the Olympics,
+as well as a page generally linking to the "Olympic Games" directly.
+
+An interesting feature of using a sentence embedding database,
+rather than just a word-based index, is that the model can point you
+to the direct answer to a query. This works well for the retrieval of factual 
+information of various kinds:
+<blockquote>
+**Q: quentin tarantino style**<br/>
+Quentin Tarantino's filmmaking style is characterized by non-linear narratives,
+sharp dialogue, pop culture homage, strong female characters, graphic violence,
+eclectic soundtracks, masterful pacing, playful narrative references, lush visuals,
+and narrative closure.
+</blockquote>
+<blockquote>
+**Q: latest us president**<br/>
+The current President of the United States is Donald J Trump.
+</blockquote>
+<blockquote>
+**Q: highest mountain USA**<br/>
+The highest mountain in North America is Mount McKinley (6,194m) in Alaska.
+</blockquote>
+
+The latter two of these examples really help to highlight the value of embeddings,
+where simple text-based searches might otherwise fail. The cosine distance between
+_latest_ and _current_ is small, allowing us to surface the correct information
+about the president, even when the query is phrased slightly differently. Similarly,
+the last example response does not match the 'USA' keyword exactly;
+however, the terms _North America_ and _Alaska_ are encoded as vectors close to _USA_,
+allowing the answer to be surfaced nonetheless, as if the underlying system "understands" 
+our requests.
+
+### To be continued...
+***This post is a WIP. It will soon be updated.***
+
+<br/>
+#### Further reading

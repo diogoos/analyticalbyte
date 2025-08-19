@@ -1,11 +1,13 @@
 ---
 import HeaderLink from './HeaderLink.astro';
+import logo from "../assets/analyticalbyte.png";
 ---
 
 <header>
 	<nav>
 		<h2><a href="/">
-			<img src="/analyticalbyte.png" id="headlogo" />
+			<img width="187" height="45" alt="AnalyticalByte logo" src={logo.src} id="headlogo" />
+			<span class="screenreader-only">AnalyticalByte: home</span>
 		</a></h2>
 		
 		<div class="internal-links">
@@ -49,5 +51,16 @@ import HeaderLink from './HeaderLink.astro';
 		.internal-links {
 			display: none;
 		}
+	}
+
+	.screenreader-only {
+		border: 0;
+		clip: rect(0 0 0 0);
+		height: 1px;
+		margin: -1px;
+		overflow: hidden;
+		padding: 0;
+		position: absolute;
+		width: 1px;
 	}
 </style>

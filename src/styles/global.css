@@ -145,3 +145,10 @@ a, a.active {
 .gist .gist-meta {
 	border-radius: 0 0 0.8em 0.8em !important;
 }
+
+.footnotes {
+    font-size: 0.9em;
+}
+.footnotes > ol > li > p {
+	margin-bottom: 0;
+}
