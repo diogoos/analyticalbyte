@@ -2,6 +2,7 @@
 title: "Building an AI-augmented search engine"
 description: "Using vector embeddings to create a better search engine"
 pubDate: 'Aug 19 2025'
+updatedDate: 'Aug 21 2025'
 ---
 Search kind of sucks nowadays.
 Even a simple query likely yields pages of "slop" content that hijacks SEO in order
@@ -253,6 +254,161 @@ The examples above, similarly to the initial proof of concept, are particularly 
 because they are able to find the "intent" behind these queries, highlighting
 the semantic similarity between "NH" and "New Hampshire", for example, and
 surfacing relevant content.
+
+### AI-augmentation
+So far, the process of building this search engine hasn't really involved much of
+the 'AI-augmentation' the title of this post had previously promised,
+beyond the use of embeddings. But those don't really count as AI in the sense
+most people expect:
+
+> "[Embeddings] are foundational for artificial intelligence (AI). Technically,
+embeddings are vectors created by **machine learning models** for the purpose of
+capturing meaningful data" - [Cloudflare](https://www.cloudflare.com/learning/ai/what-are-embeddings/#:~:text=Since%20embeddings%20make%20it%20possible,for%20artificial%20intelligence%20(AI).&text=Technically%2C%20embeddings%20are%20vectors%20created,meaningful%20data%20about%20each%20object.)
+
+So, really, all we have done is use fancy statistic models -- which is not quite
+what you'd pitch as a VC-backed B2C AI-powered SaaS digital platform. So, where can we
+use AI to improve this process?
+
+#### 1. Query optimization
+Users rarely type queries in the most "search-friendly" way. A simple example:
+someone searching "dog breed black and white" probably means "list of dog breeds
+with black-and-white coats." An LLM can act as a query rewriter, transforming short,
+ambiguous user inputs into clearer, semantically richer queries. This makes the
+search more accurate and helps retrieve results that are closer to what the user
+actually wants, not just what they typed.
+
+#### 2. Cross-ranking
+Our current ranking relies mostly on embedding similarity. That works, but it
+doesn't capture all the nuance. A lightweight AI model (or even a fine-tuned LLM)
+could serve as a cross-ranker: once we've got a handful of top candidate results,
+the model re-scores them by considering things like semantic closeness, diversity,
+or user intent. This mimics what modern search engines already do — a two-stage
+retrieval process where fast vector search narrows the field, and then smarter
+models refine the order.
+
+#### 3. Retrieval-augmented generation 
+Finally, an LLM can sit on top as a summarizer, pulling together the key
+information from multiple chunks into a single coherent answer. Instead of
+showing five different Wikipedia excerpts about Hawaii's islands,
+the tool could generate a concise, natural-language explanation:
+"Hawaii consists of eight main islands, including Maui, Oahu, and the Island of Hawai‘i…"
+This makes the tool feel less like a search engine and more like an assistant.
+
+Moreover, by feeding the LLM some of the top-ranking embedding chunks,
+we can ground its summaries in factual context rather than letting it "hallucinate."
+This approach, often called _retrieval-augmented generation_ (RAG), ensures that
+the model has real source material to draw from. The LLM doesn't have to invent
+answers, as it can extract and rephrase the relevant details from the retrieved
+passages.
+
+Even better, because those chunks come with metadata (like the original page URL),
+the LLM can cite its sources alongside the generated summary.
+This not only increases trustworthiness, but also makes the results feel more
+like a search engine + AI assistant hybrid: concise, readable summaries with
+transparent references to where the information came from.
+
+#### Building an AI-augmented Wikipedia Search Engine
+
+Implementing these AI-powered optimizations can be pretty easy, by making use of
+existing pre-trained models and simply adding them to the querying chain. Since one
+of the driving ideas behind this project is that it should be locally-run (from
+creating the embeddings to processing queries), I refrained from using the
+OpenAI API and similar options, and instead used [ollama](https://ollama.com) to
+get an LLM model running locally.
+
+The first change I tackled related to query optimization, as it was one of the
+main drawbacks of the current model. Currently, we struggle a lot with compound
+queries: users might type things like "history _or_ culture of Hawaii", which 
+might not cleanly match to the most relevant embeddings. This is where we can
+use an LLM as a query rewriter, expanding a short or ambiguous query into several
+semantically optimized alternatives. Here's the system prompt that I came up
+to test this model:
+
+```
+You are helping optimize search queries for a semantic search engine.
+Given a user's query, generate several alternative phrasings that
+capture the different possible interpretations of the intent.  
+
+- Expand short or vague queries into more descriptive ones.  
+- Include options that use synonyms or rewording.  
+- If the query seems to involve an "or" condition (two alternative ideas),  
+  produce separate queries for each alternative as well as one combined
+  form.  
+
+Example 1: Simple query
+User query: "dog breed black and white"
+Example output queries:
+	1. "List of dog breeds that have black and white coats"
+	2. "Dog breeds with spotted black and white fur"
+	3. "Examples of black-and-white colored dogs"
+	4. "Dalmatian and other black-and-white dog breeds"
+
+Example 2: Compound query
+User query: "history OR culture of Hawaii"
+Output queries:
+	1. "History of Hawaii"
+	2. "Cultural traditions of Hawaii"
+	3. "History and culture of Hawaii"
+	4. "Historical events that shaped Hawaiian culture"
+	5. "Overview of Hawaii's history and cultural heritage"
+
+Return the outputs in JSON form.  
+For example: ["History of Hawaii", "Cultural traditions of Hawaii", "History and culture of Hawaii"].  
+
+You must output only a JSON array containing only strings.  
+Do not include any other text, explanation, or formatting.
+```
+
+An initial test with this system prompt showed very promising results. For example,
+for a test query of `"budget airlines europe asia"`, the model was correctly able
+to identify and expand the compound query and generate a list of intents that would
+generate higher ranking results:
+
+```json
+[
+  "Affordable flights available in Europe or Asia",
+  "Budget airlines operating in Europe",
+  "Budget airlines operating in Asia",
+  "Low-cost airlines in Europe and Asia",
+]
+```
+
+Here, you can compare the performance of the search engine with and without this
+LLM query generation:
+
+import wk_optim from "../../assets/searchengine_wikisearch_ai_optim.png"
+import wk_unop from "../../assets/searchengine_wikisearch_ai_unop.png"
+
+<Splide aria-label="Results with and without AI query optimization">
+  <SplideSlide> <img src={wk_optim.src} alt="With AI optimization"/> </SplideSlide>
+  <SplideSlide> <img src={wk_unop.src} alt="Without AI optimization"/> </SplideSlide>
+</Splide>
+
+In the unoptimized search, we obtain a mixed bag of results. We first surface
+_Air Atlanta Europe_, which was a low-cost carrier, but is now defunct. Next, we
+do find one European and one Asian budget airline, which aligns with the user's
+intent. However, the next results are very poor: they include a _List of Airlines_,
+which is too broad for this query; and it surfaces an article about
+the _Airbus A300_ which deviates from the user's intent.
+
+In comparison, by using the LLM-generated queries, we were able to obtain subjectively
+better results, with all five links directly pertaining to the the user's query
+and intent. We first surface a broad overview article about budget airlines in general,
+which itself includes a list of airlines -- then we include 4 low cost airlines
+that attend to the user's intent, _AirAsia, Asiana Airlines, Air Europa and
+Pakistan Airlines._
+
+The power of LLM augmentation is objectively reflected in the much lower scores
+for each model. The unoptimized query ranges from 0.91 to 0.98, while the optimized
+ones are significantly lower, ranging from 0.67 to 0.82. (Note that, in this case,
+a lower score means semantically closer results, and thus is better.)
+This happens because two of the LLM-generated alternative queries,
+_"Budget airlines operating in Europe"_ and _"Budget airlines operating in Asia"_
+are much closer semantic matches than other options -- they perform much better
+the original query, as well as the other LLM-generated queries, and thus
+surface better results.
+
+
 
 ### To be continued...
 ***This post is a WIP. It will soon be updated.***
