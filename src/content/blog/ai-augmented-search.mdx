@@ -307,15 +307,16 @@ This not only increases trustworthiness, but also makes the results feel more
 like a search engine + AI assistant hybrid: concise, readable summaries with
 transparent references to where the information came from.
 
-#### Building an AI-augmented Wikipedia Search Engine
+### Building an AI-augmented (Wikipedia) Search Engine
+Implementing these AI-powered optimizations to our existing model can be
+done pretty easily, by making use of existing pre-trained models and simply
+adding them to the querying chain. Since one of the driving ideas behind this
+project is that it should be locally-run (from creating the embeddings to
+processing queries), I refrained from using the OpenAI API and similar options,
+and instead used [ollama](https://ollama.com) to get an LLM model running locally.
+Even better results can be achieved by using one of these leading APIs instead.
 
-Implementing these AI-powered optimizations can be pretty easy, by making use of
-existing pre-trained models and simply adding them to the querying chain. Since one
-of the driving ideas behind this project is that it should be locally-run (from
-creating the embeddings to processing queries), I refrained from using the
-OpenAI API and similar options, and instead used [ollama](https://ollama.com) to
-get an LLM model running locally.
-
+#### Implementing query optimization
 The first change I tackled related to query optimization, as it was one of the
 main drawbacks of the current model. Currently, we struggle a lot with compound
 queries: users might type things like "history _or_ culture of Hawaii", which 
@@ -408,10 +409,81 @@ are much closer semantic matches than other options -- they perform much better
 the original query, as well as the other LLM-generated queries, and thus
 surface better results.
 
+#### Implementing cross-ranking & snippets
+Using the same LLM technique, we can cross-rank an even broader range of results,
+from across all the different query variations. I opted to again use a local LLM
+model, with the following prompt:
 
+```
+You are a search ranking assistant. 
+Your task is to re-rank a list of candidate passages for a given user query. 
+Rank the passages by how well they answer the query, considering both relevance and usefulness. 
+Return a JSON object with each passage ID and a relevance score between 0 (not relevant) and 5 (perfect match).
 
-### To be continued...
-***This post is a WIP. It will soon be updated.***
+Query: "{user_query}"
+
+Candidate passages:
+1. [ID: p1] "{passage_1}"
+2. [ID: p2] "{passage_2}"
+3. [ID: p3] "{passage_3}"
+...
+N. [ID: pN] "{passage_N}"
+
+Output strictly in JSON format as:
+{
+  "p1": score,
+  "p2": score,
+  "p3": score,
+  ...
+}
+```
+
+I decided to use a weighted linear combination for the re-ranking of the results,
+with an adjusted weight between the retriever and LLM scores, normalized between
+0 and 1. Some pseudo code for this process is shown below:
+
+```python
+# Example scores
+vector_distances = [0.72, 0.85, 0.64, 0.58]   # Euclidean distance
+llm_scores       = [4, 5, 2, 1]               # LLM output (0–5)
+
+# Convert distance to similarity
+vector_scores = [1 / (1 + distance) for distance in vector_distances]
+
+# Convert to numpy
+vector_scores = np.array(vector_scores).reshape(-1, 1)
+llm_scores = np.array(llm_scores).reshape(-1, 1)
+
+# Normalize each to [0, 1]
+scaler = MinMaxScaler()
+vector_norm = scaler.fit_transform(vector_scores).flatten()
+llm_norm = scaler.fit_transform(llm_scores).flatten()
+
+# Combine with weighted sum
+alpha = 0.6  # weight for retriever
+beta = 0.4   # weight for LLM
+final_scores = alpha * vector_norm + beta * llm_norm
+
+ranking = np.argsort(-final_scores)  # descending order
+```
+
+Finally, the implementation of _RAG_ follows a very similar approach, were
+a LLM model is given a general prompt & the retrieved chunks from each webpage,
+and asked to formulate a coherent summary.
+
+### Next steps
+For the future development of this project/concept, I'm mostly interested in:
+1. Building & scaling a better interface (web) for search.
+2. Expanding beyond the Simple Wikipedia dataset, perhaps by using C4, derived
+from Common Crawl, to index the general web.
+3. Renting compute from a service such as RunPod or CoCalc in order to train
+fined-tuned models for the AI features outlined here, such as cross-ranking
+and RAG.
+4. Organizing & publishing the code from this project on Github
+
+You can keep up with __AnalyticalByte__ by subscribing to the
+RSS feed [here](/rss.xml), which I hope to keep updating with my work on this (& 
+more) projects.
 
 <br/>
 ### Further reading
